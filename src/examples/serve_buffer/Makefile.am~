@@ -1,0 +1,5 @@
+INCLUDES = -I$(top_srcdir)/src
+METASOURCES = AUTO
+bin_PROGRAMS = serve_buffer
+simple1_SOURCES = serve_buffer.c
+simple1_LDADD = $(top_builddir)/src/libwebshare.a
