@@ -11,11 +11,12 @@
 
 
 
+
+#ifndef WEBSHARE_H_
+#define WEBSHARE_H_
+
 #include <sys/socket.h>
 #include "hash.h"
-
-#ifndef _WEBSHARE_H_
-#define _WEBSHARE_H_
 
 typedef struct webshare_config_s webshare_config;
 struct webshare_config_s {
@@ -24,10 +25,12 @@ struct webshare_config_s {
   struct {
     char *unknown;
   } mime;
+
   struct {
     int model;
     int pool_size;
   } threading;
+
   struct {
     void(*message_cb)(char *);
     void(*warning_cb)(char *);
