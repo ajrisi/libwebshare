@@ -12,7 +12,7 @@
 #ifndef _VERSION_H_
 #define _VERSION_H_
 
-#define LIBWEBSHARE_VERSION 0.2
-#define LIBWEBSHARE_VERSIONSTR "libwebshare/0.2 feb2009"
+#define LIBWEBSHARE_VERSION 0.3
+#define LIBWEBSHARE_VERSIONSTR "libwebshare/0.3 oct2009"
 
 #endif

@@ -12,13 +12,29 @@
 
 
 
-#ifndef _WEBSHARE_H_
-#define _WEBSHARE_H_
+#ifndef WEBSHARE_H_
+#define WEBSHARE_H_
 
+#include <sys/types.h>
 #include <sys/socket.h>
-#include "hash.h"
+#include <netinet/in.h>
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <sys/wait.h>
+#include <stdio.h>
+#include <unistd.h>
 
 
+
+#include <config.h>
+#include <version.h>
+
+#include <http.h>
+#include <client_thread.h>
+#include <string.h>
+#include <util.h>
+
+#include <pagetable.h>
 
 typedef struct webshare_config_s webshare_config;
 struct webshare_config_s {
@@ -34,7 +50,7 @@ struct webshare_config_s {
   } threading;
 
   struct {
-    void(*message_cb)(char *);
+    void(*info_cb)(char *);
     void(*warning_cb)(char *);
     void(*critical_cb)(char *);
     void(*fatal_cb)(char *);
@@ -44,15 +60,14 @@ struct webshare_config_s {
 typedef struct webshare_s WEBSHARE;
 struct webshare_s {
   int listenfd;
+  pagetable *pages;
   webshare_config config;
-  // webshare_error_callbacks error_callbacks;
-  hshtbl *pagetable;
 };
 
 enum {
+  NO_THREADS,
   THREAD_PER_CLIENT,
   THREAD_POOL,
-  SELECT
 };
 
 typedef enum {
@@ -61,13 +76,41 @@ typedef enum {
   PI_FILE
 } post_type_t;
 
-/* Functions */
-WEBSHARE *webshare_init(webshare_config *config);
+/** 
+ * Create a new webshare embedded HTTP server
+ * 
+ * @param config 
+ * 
+ * @return 
+ */
+WEBSHARE *webshare_new(webshare_config *config);
 
+/** 
+ * Start the webshare server, this function will NOT return
+ * 
+ * @param ws the webshare to start
+ * 
+ * @return 0 on success, neg, on failure
+ */
 int webshare_start(WEBSHARE *ws);
+
+/** 
+ * Stop the webshare server
+ * 
+ * @param ws the server to stop
+ * 
+ * @return 0 on success, neg. on failure
+ */
 int webshare_stop(WEBSHARE *ws);
 
-webshare_config webshare_default_config( void );
+int webshare_post_buffer(WEBSHARE *ws, char *path, char *buffer);
+
+int webshare_post_file(WEBSHARE *ws, char *path, char *file_path);
+
+int webshare_post_function(WEBSHARE *ws, char *path, void*(*callback)(void *data));
+
+void webpage_post_remove(WEBSHARE *ws, char *path);
+
 
 
 #endif

@@ -8,103 +8,73 @@
  * 
  */
 
-#include <string.h>
-
-#include <string.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <arpa/inet.h>
-#include <sys/wait.h>
-#include <stdio.h>
-#include <unistd.h>
-
-
-#include "config.h"
-#include "version.h"
-
-#include "webshare.h"
-#include "wserror.h"
-#include "http.h"
-#include "mime.h"
-#include "wspagetable.h"
+#include <webshare.h>
+#include <client_thread.h>
 
 /**
- * Initialize the webshare system - this does not actually start
- * anything, just initialize the internal storage
- *
- * @param  
- * @return 
+ * Private Functions
+ * 
  */
-WEBSHARE *webshare_init(webshare_config *config)
+static webshare_config webshare_default_config( void );
+
+
+WEBSHARE *webshare_new(webshare_config *config)
 {
   WEBSHARE *ws = (WEBSHARE*)malloc(sizeof(WEBSHARE));
-  if(ws == NULL) return NULL;
+  if(ws == NULL) {
+    return NULL;
+  }
+
   if(config != NULL) {
-    //customized configuration
-    memcpy(&ws->config, config, sizeof(webshare_config));
+    ws->config = *config;
   } else {
-    //default configuration
     ws->config = webshare_default_config();
   }
 
-  /* initialize the page table */
-  if(webpage_table_init(&(ws->pagetable)) != 0) {
-    wserror(ws, FATAL, "could not initialize the webpage table\n");
-  }
-
-  /* initialize the mime table */
-  if(mime_trie == NULL)
-    mime_table_init();
-
-  http_init();
+  ws->pages = pagetable_new();
 
   return ws;
 }
 
-webshare_config webshare_default_config()
-{
-  webshare_config ws = {0};
-  ws.host = DEFAULT_HOST;
-  ws.port = DEFAULT_PORT;
-  
-  ws.mime.unknown = UNKNOWN_MIME;
-  
-  ws.threading.model = THREAD_PER_CLIENT;
-  ws.threading.pool_size = THREAD_POOL_SIZE;
-  
-  return ws;
-}
-
-/** 
- * Start up the webshare server. This function should not return 
- * UNTIL it has been directed to by a call to the stop function (from a seperate thread is fine)
- * 
- * @param ws 
- * 
- * @return 
- */
 int webshare_start(WEBSHARE *ws)
 {
   int listenfd, connfd;
-  int i, maxi;
-  int nready;
+  int i;
   struct sockaddr_in servaddr;
 
   struct sockaddr client;
   socklen_t client_size;
 
+  connfd = -1;
+  memset(&client, 0, sizeof(client));
+  client_size = 0;
 
   listenfd = socket(PF_INET, SOCK_STREAM, 0);
   if(listenfd == -1) {
     return -1;
   }
 
-  bzero(&servaddr, sizeof(servaddr));
+
+  ws->listenfd = listenfd;
+
+  struct linger l;
+
+  /* fix the linger opations so that we are not left in a TIME WAIT on
+     close */
+  l.l_onoff = 1;
+  l.l_linger = 0;
+  i = setsockopt(listenfd, SOL_SOCKET, SO_LINGER, &l, sizeof(l));
+  if(i < 0) {
+    return -1;
+  }
+
+  char yep = 1;
+  setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &yep, sizeof(char));  
+
+  memset(&servaddr, 0, sizeof(servaddr));
   servaddr.sin_family = AF_INET;
   servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-  servaddr.sin_port = htons(9899);
+  servaddr.sin_port = htons(ws->config.port);
 
   if(bind(listenfd, (struct sockaddr *)&servaddr, (socklen_t)sizeof(servaddr)) == -1) {
     return -1;
@@ -114,64 +84,64 @@ int webshare_start(WEBSHARE *ws)
     return -1;
   }
 
-  ws->listenfd = listenfd;
-  
-  char yep = 1;
-  setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &yep, sizeof(char));  
   while((connfd = accept(listenfd, &client, &client_size)) != -1) {
-    setsockopt(connfd, SOL_SOCKET, SO_REUSEADDR, &yep, sizeof(char));
-    //read and toss from connfd
-    char data_read[HTTP_MAX_REQUEST_HEADER_SIZE] = {0};
-    while(read(connfd, data_read, HTTP_MAX_REQUEST_HEADER_SIZE) != 0) {
-      //printf("%s\n", data_read);
-      if(strstr(data_read, "\r\n\r\n") != NULL) {
-	break;
-      }
-    }
-    printf("read %d bytes\n", strlen(data_read));
-    printf("Done read.\n");
-    
-    /* ideally, parse the headers, look for the url, and do the app. sending */
 
-    http_request req = parse_http_request(data_read);
+    printf("Got a client\n");
 
-    /* look at the path, see if there is something lined up to serve */
-    webpage_table_item *it = webpage_table_find(ws->pagetable, req.path);
-    if(it != NULL) {
-      if(it->postitem_type == POSTITEM_BUFFER) {
-	/* compare the types of shares, if it is a buffer, send it out */
-	char *test_page = "HTTP/1.0 200 OK\r\nContent-type: text/plain\r\n\r\n";
-	write(connfd, test_page, strlen(test_page));
-	write(connfd, it->value.buffer, strlen(it->value.buffer));
-      } else if(it->postitem_type == POSTITEM_FILE) {
-	/* if it is a file, send out the header, then read in and send out the file */
-	char header[1024];
-	char *header_fmt = "HTTP/1.0 200 OK\r\nContent-type: %s\r\n\r\n";
-	sprintf(header, header_fmt, it->
-      }
-    } else {
-      char *test_page = "HTTP/1.0 404 Page Not Found\r\nContent-type: text/plain\r\n\r\n404 Page Not Found";
-      write(connfd, test_page, strlen(test_page));
-    }
+    /* create the client_thread data */
+    client_data d;
+    d.remote_fd = connfd;
+    d.ws = ws;
 
-    close(connfd);
+    (void) client_thread((void*)&d);
+
   }
 
+  return 0;
 }
 
-/** 
- * Stop the webshare server
- * 
- * @param ws 
- * 
- * @return 
- */
 int webshare_stop(WEBSHARE *ws)
 {
   close(ws->listenfd);
+  return 0;
+}
 
-  webshare_pagetable_free(ws);
+int webshare_post_buffer(WEBSHARE *ws, char *path, char *buffer)
+{
+  return pagetable_post_buffer(ws->pages, path, buffer);
+}
 
-  http_free();
+int webshare_post_file(WEBSHARE *ws, char *path, char *file_path)
+{
+  return pagetable_post_file(ws->pages, path, file_path);
+}
+
+int webshare_post_function(WEBSHARE *ws, char *path, void*(*callback)(void *data))
+{
+  return pagetable_post_function(ws->pages, path, callback);
+}
+
+void webshare_post_remove(WEBSHARE *ws, char *path)
+{
+  pagetable_remove(ws->pages, path);
+}
+
+
+/**
+ * Private Functions
+ * 
+ */
+static webshare_config webshare_default_config()
+{
+  webshare_config ws = {0};
+  ws.host = DEFAULT_HOST;
+  ws.port = DEFAULT_PORT;
+  
+  ws.mime.unknown = DEFAULT_UNKNOWN_MIME;
+  
+  ws.threading.model = DEFAULT_THREADING_MODEL;
+  ws.threading.pool_size = DEFAULT_THREAD_POOL_SIZE;
+  
+  return ws;
 }
 
